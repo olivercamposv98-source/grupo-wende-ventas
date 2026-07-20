@@ -191,59 +191,109 @@ with st.sidebar:
     pagina = st.radio("Menú", MENU, label_visibility="collapsed")
 
     st.divider()
+    fecha_min = df["FECHA"].min().date()
+    fecha_max = df["FECHA"].max().date()
+
+    # Mes con cobertura amplia -> rango por defecto (1 al último día con datos)
     meses = sorted(df["MES"].unique())
     n_tiendas = df["SUCURSAL"].nunique()
     cobertura = df.groupby("MES")["SUCURSAL"].nunique()
     candidatos = [m for m in meses if cobertura.get(m, 0) >= n_tiendas / 2]
-    mes_default = candidatos[-1] if candidatos else meses[-1]
-    etiqueta = lambda m: f"{MESES_ES[m.month]} {m.year}"
+    mes_def = candidatos[-1] if candidatos else meses[-1]
+    ini_def = max(mes_def.start_time.date(), fecha_min)
+    fin_def = min(mes_def.end_time.date(), fecha_max)
 
-    mes_actual = st.selectbox("Mes", meses, index=meses.index(mes_default), format_func=etiqueta)
-    mes_anterior = mes_actual - 1
+    # Atajos rápidos de rango
+    atajo = st.radio("Rango rápido", ["Mes actual", "Últimos 7 días",
+                                      "Últimos 30 días", "Personalizado"],
+                     horizontal=False, label_visibility="collapsed")
+    if atajo == "Últimos 7 días":
+        ini_def, fin_def = fecha_max - pd.Timedelta(days=6), fecha_max
+    elif atajo == "Últimos 30 días":
+        ini_def, fin_def = fecha_max - pd.Timedelta(days=29), fecha_max
+
+    if atajo == "Personalizado":
+        rango = st.date_input("Rango de fechas", value=(ini_def, fin_def),
+                              min_value=fecha_min, max_value=fecha_max,
+                              format="DD/MM/YYYY")
+    else:
+        rango = (ini_def, fin_def)
+        st.caption(f"Rango: {pd.Timestamp(ini_def):%d/%m/%Y} – {pd.Timestamp(fin_def):%d/%m/%Y}")
+
+    # Normalizar el rango (date_input puede devolver 1 sola fecha mientras se elige)
+    if isinstance(rango, (list, tuple)) and len(rango) == 2:
+        f_ini, f_fin = pd.Timestamp(rango[0]), pd.Timestamp(rango[1])
+    else:
+        f_ini = f_fin = pd.Timestamp(rango[0] if isinstance(rango, (list, tuple)) else rango)
+    if f_fin < f_ini:
+        f_ini, f_fin = f_fin, f_ini
+
     marcas_sel = st.multiselect("Marcas", sorted(df["MARCA"].unique()),
                                 default=sorted(df["MARCA"].unique()))
     st.caption(f"Fuente: {df.attrs['fuente']}")
     st.caption(f"Último dato: {df['FECHA'].max():%d/%m/%Y}")
 
+# --- Rango actual y su equivalente un mes atrás ---
+n_dias_rango = (f_fin - f_ini).days + 1
+f_ini_ant = f_ini - pd.DateOffset(months=1)
+f_fin_ant = f_fin - pd.DateOffset(months=1)
+
 df_f = df[df["MARCA"].isin(marcas_sel)]
-d_act = df_f[df_f["MES"] == mes_actual]
-d_ant = df_f[df_f["MES"] == mes_anterior]
+d_act = df_f[(df_f["FECHA"] >= f_ini) & (df_f["FECHA"] <= f_fin)]
+d_ant = df_f[(df_f["FECHA"] >= f_ini_ant) & (df_f["FECHA"] <= f_fin_ant)]
 if d_act.empty:
-    st.warning("No hay ventas para el mes y marcas seleccionadas.")
+    st.warning("No hay ventas en el rango de fechas y marcas seleccionadas.")
     st.stop()
 
-# ------------------------------------------------------------
-# 5) CÁLCULOS GLOBALES
-# ------------------------------------------------------------
-dias_mes = calendar.monthrange(mes_actual.year, mes_actual.month)[1]
-dia_corte = int(d_act["DIA"].max())
-dias_rest = dias_mes - dia_corte
+etiqueta_rango = f"{f_ini:%d/%m/%Y} – {f_fin:%d/%m/%Y}"
+etiqueta_rango_ant = f"{f_ini_ant:%d/%m/%Y} – {f_fin_ant:%d/%m/%Y}"
+# ¿El rango cierra en el último día con datos del mes en curso? -> tiene sentido proyectar
+mes_en_curso = f_fin.to_period("M")
+ultimo_dia_datos = df[df["MES"] == mes_en_curso]["FECHA"].max()
+proyectable = (f_fin == ultimo_dia_datos) and (f_ini.to_period("M") == mes_en_curso) \
+              and (f_ini.day == 1)
 
-venta_mtd = d_act["VENTA"].sum()
-run_rate = venta_mtd / dia_corte * dias_mes
-venta_ant = d_ant["VENTA"].sum()
-venta_ant_mismo = d_ant[d_ant["DIA"] <= dia_corte]["VENTA"].sum()
-prom_diario = venta_mtd / dia_corte
-mom = (venta_mtd / venta_ant_mismo - 1) if venta_ant_mismo else np.nan
-cumpl = (run_rate / venta_ant) if venta_ant else np.nan
-ritmo_req = (venta_ant - venta_mtd) / dias_rest if dias_rest > 0 else 0
+# ------------------------------------------------------------
+# 5) CÁLCULOS GLOBALES (basados en el rango de fechas)
+# ------------------------------------------------------------
+dias_con_datos = d_act["FECHA"].nunique() or 1        # días efectivos con venta
+venta_mtd = d_act["VENTA"].sum()                       # venta del rango
+venta_ant = d_ant["VENTA"].sum()                       # mismo rango, mes anterior
+prom_diario = venta_mtd / dias_con_datos
+mom = (venta_mtd / venta_ant - 1) if venta_ant else np.nan
 
-serie_diaria = d_act.groupby("DIA")["VENTA"].sum().sort_index()
+# Proyección de cierre: solo cuando el rango es "mes en curso hasta hoy"
+if proyectable:
+    dias_mes = calendar.monthrange(f_fin.year, f_fin.month)[1]
+    dia_corte = int(f_fin.day)
+    dias_rest = dias_mes - dia_corte
+    run_rate = venta_mtd / dia_corte * dias_mes
+    venta_ant_total_mes = df_f[df_f["MES"] == (mes_en_curso - 1)]["VENTA"].sum()
+    cumpl = (run_rate / venta_ant_total_mes) if venta_ant_total_mes else np.nan
+    ritmo_req = (venta_ant_total_mes - venta_mtd) / dias_rest if dias_rest > 0 else 0
+else:
+    dias_mes = dia_corte = dias_rest = 0
+    run_rate = np.nan
+    venta_ant_total_mes = np.nan
+    cumpl = np.nan
+    ritmo_req = 0
+
+serie_diaria = d_act.groupby("FECHA")["VENTA"].sum().sort_index()
 
 # Ranking por tienda (usado en varias páginas)
-g_act = d_act.groupby(["SUCURSAL", "MARCA"])["VENTA"].sum().rename("Este mes")
-g_ant = d_ant.groupby("SUCURSAL")["VENTA"].sum().rename("Mes anterior")
-g_ant_mismo = d_ant[d_ant["DIA"] <= dia_corte].groupby("SUCURSAL")["VENTA"].sum()
+g_act = d_act.groupby(["SUCURSAL", "MARCA"])["VENTA"].sum().rename("Rango actual")
+g_ant = d_ant.groupby("SUCURSAL")["VENTA"].sum().rename("Rango anterior")
 rank = g_act.reset_index().merge(g_ant.reset_index(), on="SUCURSAL", how="outer")
 rank["MARCA"] = rank["MARCA"].fillna(rank["SUCURSAL"].apply(asignar_marca))
-rank = rank.fillna({"Este mes": 0, "Mes anterior": 0})
-rank["Proyección"] = rank["Este mes"] / dia_corte * dias_mes
-rank["_mismo"] = rank["SUCURSAL"].map(g_ant_mismo).fillna(0)
-rank["¿Cómo va?"] = np.where(rank["_mismo"] > 0, rank["Este mes"] / rank["_mismo"] - 1, np.nan)
+rank = rank.fillna({"Rango actual": 0, "Rango anterior": 0})
+rank["¿Cómo va?"] = np.where(rank["Rango anterior"] > 0,
+                             rank["Rango actual"] / rank["Rango anterior"] - 1, np.nan)
+if proyectable:
+    rank["Proyección"] = rank["Rango actual"] / dia_corte * dias_mes
 rank["Estado"] = np.select(
-    [rank["Mes anterior"] == 0, rank["Proyección"] >= rank["Mes anterior"]],
-    ["Nueva", "Supera la meta"], default="Bajo la meta")
-rank = rank.sort_values("Este mes", ascending=False).reset_index(drop=True)
+    [rank["Rango anterior"] == 0, rank["Rango actual"] >= rank["Rango anterior"]],
+    ["Nueva", "Supera al mes anterior"], default="Bajo el mes anterior")
+rank = rank.sort_values("Rango actual", ascending=False).reset_index(drop=True)
 
 def encabezado(titulo, subtitulo):
     st.markdown(f"<h1 style='margin-bottom:0'>{titulo}</h1>"
@@ -254,33 +304,44 @@ def encabezado(titulo, subtitulo):
 # PÁGINA · GENERAL
 # ============================================================
 if pagina == MENU[0]:
-    encabezado("Resumen General",
-               f"Resumen de {etiqueta(mes_actual)} · corte al día {dia_corte} · "
+    encabezado("Dashboard Principal",
+               f"Rango: {etiqueta_rango} · {d_act['FECHA'].nunique()} días con venta · "
                f"{d_act['SUCURSAL'].nunique()} tiendas activas")
 
     k1, k2, k3 = st.columns(3)
-    kpi(k1, "Ventas totales", fmt(venta_mtd), mom, "vs mes anterior",
+    kpi(k1, "Ventas totales", fmt(venta_mtd), mom, "vs mismo rango del mes anterior",
         sparkline(serie_diaria.values))
-    kpi(k2, "Proyección de cierre", fmt(run_rate),
-        (cumpl - 1) if not pd.isna(cumpl) else None, "vs total mes anterior",
-        sparkline(serie_diaria.cumsum().values))
+    if proyectable:
+        kpi(k2, "Proyección de cierre", fmt(run_rate),
+            (cumpl - 1) if not pd.isna(cumpl) else None, "vs total mes anterior",
+            sparkline(serie_diaria.cumsum().values))
+    else:
+        kpi(k2, "Venta del rango anterior", fmt(venta_ant), None,
+            etiqueta_rango_ant, sparkline(serie_diaria.cumsum().values))
     kpi(k3, "Venta promedio diaria", fmt(prom_diario), None,
-        f"{dia_corte} días transcurridos",
+        f"{dias_con_datos} días con venta",
         sparkline(serie_diaria.rolling(3, min_periods=1).mean().values, C_GREEN))
 
     st.markdown("<br>", unsafe_allow_html=True)
-    if not pd.isna(cumpl):
+    if proyectable and not pd.isna(cumpl):
         if cumpl >= 1:
             st.markdown(f"<div class='box' style='border-left-color:{C_GREEN}'>"
                         f"<b>Vamos bien:</b> proyección de cierre {fmt(run_rate)} "
-                        f"(<b style='color:{C_GREEN}'>{cumpl-1:+.1%}</b> vs {MESES_ES[mes_anterior.month]}).</div>",
+                        f"(<b style='color:{C_GREEN}'>{cumpl-1:+.1%}</b> vs el mes anterior).</div>",
                         unsafe_allow_html=True)
         else:
             st.markdown(f"<div class='box' style='border-left-color:{C_RED}'>"
                         f"<b>Atención:</b> proyección {fmt(run_rate)} "
-                        f"(<b style='color:{C_RED}'>{cumpl-1:+.1%}</b>). Para igualar a "
-                        f"{MESES_ES[mes_anterior.month]} hay que vender <b>{fmt(max(ritmo_req,0))}/día</b> "
+                        f"(<b style='color:{C_RED}'>{cumpl-1:+.1%}</b>). Para igualar al mes "
+                        f"anterior hay que vender <b>{fmt(max(ritmo_req,0))}/día</b> "
                         f"durante {dias_rest} días.</div>", unsafe_allow_html=True)
+    elif not pd.isna(mom):
+        color = C_GREEN if mom >= 0 else C_RED
+        verbo = "por encima" if mom >= 0 else "por debajo"
+        st.markdown(f"<div class='box' style='border-left-color:{color}'>"
+                    f"El rango vendió <b>{fmt(venta_mtd)}</b>, <b style='color:{color}'>{mom:+.1%}</b> "
+                    f"{verbo} del mismo rango del mes anterior ({etiqueta_rango_ant}: {fmt(venta_ant)}).</div>",
+                    unsafe_allow_html=True)
 
     c_izq, c_der = st.columns([0.63, 0.37])
     with c_izq:
@@ -290,26 +351,26 @@ if pagina == MENU[0]:
         marcas = m_act.sort_values(ascending=False).index.tolist()
         fig = go.Figure()
         fig.add_trace(go.Bar(x=marcas, y=[m_ant.get(m, 0) for m in marcas],
-                             name="Mes anterior", marker_color=C_GRAY, width=0.62,
-                             hovertemplate="%{x} · mes anterior: Bs %{y:,.0f}<extra></extra>"))
+                             name="Rango anterior", marker_color=C_GRAY, width=0.62,
+                             hovertemplate="%{x} · rango anterior: Bs %{y:,.0f}<extra></extra>"))
         fig.add_trace(go.Bar(x=marcas, y=[m_act.get(m, 0) for m in marcas],
-                             name="Este mes", marker_color=C_YELLOW, width=0.4,
-                             hovertemplate="%{x} · este mes: Bs %{y:,.0f}<extra></extra>"))
+                             name="Rango actual", marker_color=C_YELLOW, width=0.4,
+                             hovertemplate="%{x} · rango actual: Bs %{y:,.0f}<extra></extra>"))
         fig.update_layout(barmode="overlay", legend=dict(orientation="h", y=1.12))
         st.plotly_chart(plotly_base(fig, 360), width="stretch")
-        st.caption("Barra gris = total del mes anterior · Barra amarilla = acumulado de este mes.")
+        st.caption("Barra gris = mismo rango del mes anterior · Barra amarilla = rango seleccionado.")
     with c_der:
         st.markdown("<div class='panel-title'>Tiendas con Mejor Rendimiento</div>",
                     unsafe_allow_html=True)
-        for r in rank[rank["Este mes"] > 0].head(3).itertuples():
-            va = getattr(r, "_6")  # ¿Cómo va?
+        for _, r in rank[rank["Rango actual"] > 0].head(3).iterrows():
+            va = r["¿Cómo va?"]
             va_html = "" if pd.isna(va) else (
                 f"<span style='color:{C_GREEN if va >= 0 else C_RED};font-size:.75rem'>"
                 f"{'↗' if va >= 0 else '↘'} {va:+.0%}</span>")
-            st.markdown(f"<div class='rankcard'><div><b>{r.SUCURSAL}</b><br>"
-                        f"<span style='color:{C_MUTED};font-size:.78rem'>{r.MARCA}</span></div>"
+            st.markdown(f"<div class='rankcard'><div><b>{r['SUCURSAL']}</b><br>"
+                        f"<span style='color:{C_MUTED};font-size:.78rem'>{r['MARCA']}</span></div>"
                         f"<div style='text-align:right'><b style='color:{C_YELLOW}'>"
-                        f"{fmt(getattr(r, '_4'))}</b><br>{va_html}</div></div>",
+                        f"{fmt(r['Rango actual'])}</b><br>{va_html}</div></div>",
                         unsafe_allow_html=True)
         st.markdown("<div class='panel-title' style='margin-top:14px'>Movimiento reciente</div>",
                     unsafe_allow_html=True)
@@ -326,7 +387,7 @@ if pagina == MENU[0]:
 # ============================================================
 elif pagina == MENU[1]:
     encabezado("Venta por Marca",
-               f"{etiqueta(mes_actual)} vs {etiqueta(mes_anterior)} · participación y proyección")
+               f"{etiqueta_rango} vs mismo rango del mes anterior · participación")
 
     m_act = d_act.groupby("MARCA")["VENTA"].sum().sort_values(ascending=False)
     m_ant = d_ant.groupby("MARCA")["VENTA"].sum()
@@ -334,22 +395,22 @@ elif pagina == MENU[1]:
 
     cols = st.columns(min(len(m_act), 4))
     for col, (marca, monto) in zip(cols, m_act.items()):
-        ant_mismo = d_ant[(d_ant["MARCA"] == marca) & (d_ant["DIA"] <= dia_corte)]["VENTA"].sum()
-        delta = (monto / ant_mismo - 1) if ant_mismo else np.nan
+        ant = m_ant.get(marca, 0)
+        delta = (monto / ant - 1) if ant else np.nan
         kpi(col, marca, fmt(monto), delta, f"{monto/total:.0%} del total")
 
     st.markdown("<br>", unsafe_allow_html=True)
     c1, c2 = st.columns([0.55, 0.45])
     with c1:
-        st.markdown("<div class='panel-title'>Este mes vs mes anterior</div>", unsafe_allow_html=True)
+        st.markdown("<div class='panel-title'>Rango actual vs mes anterior</div>", unsafe_allow_html=True)
         fig = go.Figure()
         fig.add_trace(go.Bar(y=m_act.index, x=[m_ant.get(m, 0) for m in m_act.index],
-                             orientation="h", name="Mes anterior", marker_color=C_GRAY, width=0.62,
-                             hovertemplate="%{y}: Bs %{x:,.0f}<extra>Mes anterior</extra>"))
+                             orientation="h", name="Rango anterior", marker_color=C_GRAY, width=0.62,
+                             hovertemplate="%{y}: Bs %{x:,.0f}<extra>Rango anterior</extra>"))
         fig.add_trace(go.Bar(y=m_act.index, x=m_act.values, orientation="h",
-                             name="Este mes", width=0.4,
+                             name="Rango actual", width=0.4,
                              marker_color=[BRAND_COLORS.get(m, C_YELLOW) for m in m_act.index],
-                             hovertemplate="%{y}: Bs %{x:,.0f}<extra>Este mes</extra>"))
+                             hovertemplate="%{y}: Bs %{x:,.0f}<extra>Rango actual</extra>"))
         fig.update_layout(barmode="overlay", legend=dict(orientation="h", y=1.12),
                           yaxis=dict(autorange="reversed"))
         fig.update_xaxes(tickformat=",.0f")
@@ -369,16 +430,18 @@ elif pagina == MENU[1]:
         st.plotly_chart(fig_p, width="stretch")
 
     st.markdown("<div class='panel-title'>Resumen por marca</div>", unsafe_allow_html=True)
-    tm = pd.DataFrame({"Este mes": m_act,
-                       "Mes anterior": m_ant.reindex(m_act.index).fillna(0)})
-    tm["Proyección"] = tm["Este mes"] / dia_corte * dias_mes
-    tm["Participación"] = tm["Este mes"] / total
-    tm["Estado"] = np.where(tm["Mes anterior"] == 0, "Nueva",
-                            np.where(tm["Proyección"] >= tm["Mes anterior"],
-                                     "Supera la meta", "Bajo la meta"))
+    tm = pd.DataFrame({"Rango actual": m_act,
+                       "Rango anterior": m_ant.reindex(m_act.index).fillna(0)})
+    tm["¿Cómo va?"] = np.where(tm["Rango anterior"] > 0,
+                               tm["Rango actual"] / tm["Rango anterior"] - 1, np.nan)
+    tm["Participación"] = tm["Rango actual"] / total
+    tm["Estado"] = np.where(tm["Rango anterior"] == 0, "Nueva",
+                            np.where(tm["Rango actual"] >= tm["Rango anterior"],
+                                     "Supera al mes anterior", "Bajo el mes anterior"))
     st.dataframe(tm.reset_index().rename(columns={"MARCA": "Marca"}).style
-                 .format({"Este mes": "Bs {:,.0f}", "Mes anterior": "Bs {:,.0f}",
-                          "Proyección": "Bs {:,.0f}", "Participación": "{:.1%}"}),
+                 .format({"Rango actual": "Bs {:,.0f}", "Rango anterior": "Bs {:,.0f}",
+                          "Participación": "{:.1%}",
+                          "¿Cómo va?": lambda v: "—" if pd.isna(v) else f"{v:+.0%}"}),
                  width="stretch", hide_index=True)
 
 # ============================================================
@@ -386,47 +449,51 @@ elif pagina == MENU[1]:
 # ============================================================
 elif pagina == MENU[2]:
     encabezado("Venta por Tienda",
-               f"Ranking de {etiqueta(mes_actual)} · corte al día {dia_corte}")
+               f"Ranking del rango {etiqueta_rango}")
 
     fig = go.Figure()
-    fig.add_trace(go.Bar(y=rank["SUCURSAL"], x=rank["Mes anterior"], orientation="h",
-                         name="Mes anterior", marker_color=C_GRAY, width=0.66,
-                         hovertemplate="%{y}: Bs %{x:,.0f}<extra>Mes anterior</extra>"))
-    fig.add_trace(go.Bar(y=rank["SUCURSAL"], x=rank["Este mes"], orientation="h",
-                         name="Este mes", marker_color=C_YELLOW, width=0.42,
-                         hovertemplate="%{y}: Bs %{x:,.0f}<extra>Este mes</extra>"))
+    fig.add_trace(go.Bar(y=rank["SUCURSAL"], x=rank["Rango anterior"], orientation="h",
+                         name="Rango anterior", marker_color=C_GRAY, width=0.66,
+                         hovertemplate="%{y}: Bs %{x:,.0f}<extra>Rango anterior</extra>"))
+    fig.add_trace(go.Bar(y=rank["SUCURSAL"], x=rank["Rango actual"], orientation="h",
+                         name="Rango actual", marker_color=C_YELLOW, width=0.42,
+                         hovertemplate="%{y}: Bs %{x:,.0f}<extra>Rango actual</extra>"))
     fig.update_layout(barmode="overlay", legend=dict(orientation="h", y=1.06),
                       yaxis=dict(autorange="reversed"))
     fig.update_xaxes(tickformat=",.0f")
     st.plotly_chart(plotly_base(fig, 480), width="stretch")
 
     st.markdown("<div class='panel-title'>Detalle por tienda</div>", unsafe_allow_html=True)
-    styler = (rank[["SUCURSAL", "MARCA", "Mes anterior", "Este mes",
-                    "¿Cómo va?", "Proyección", "Estado"]]
-              .style
-              .format({"Mes anterior": "Bs {:,.0f}", "Este mes": "Bs {:,.0f}",
-                       "Proyección": "Bs {:,.0f}",
-                       "¿Cómo va?": lambda v: "—" if pd.isna(v) else f"{v:+.0%}"})
+    cols_tabla = ["SUCURSAL", "MARCA", "Rango anterior", "Rango actual", "¿Cómo va?"]
+    fmt_tabla = {"Rango anterior": "Bs {:,.0f}", "Rango actual": "Bs {:,.0f}",
+                 "¿Cómo va?": lambda v: "—" if pd.isna(v) else f"{v:+.0%}"}
+    if proyectable:
+        cols_tabla.insert(4, "Proyección")
+        fmt_tabla["Proyección"] = "Bs {:,.0f}"
+    cols_tabla.append("Estado")
+    styler = (rank[cols_tabla].style.format(fmt_tabla)
               .map(lambda v: f"color:{C_GREEN}" if isinstance(v, float) and v >= 0 else
                              (f"color:{C_RED}" if isinstance(v, float) and v < 0 else ""),
                    subset=["¿Cómo va?"]))
     st.dataframe(styler, width="stretch", height=500, hide_index=True)
-    st.caption("«¿Cómo va?» compara contra los mismos días del mes anterior · "
-               "«Proyección» estima el cierre al ritmo actual.")
+    cap = "«¿Cómo va?» compara contra el mismo rango del mes anterior."
+    if proyectable:
+        cap += " «Proyección» estima el cierre del mes al ritmo actual."
+    st.caption(cap)
 
-    activos = rank[rank["Este mes"] > 0]
+    activos = rank[rank["Rango actual"] > 0]
     c1, c2 = st.columns(2)
     with c1:
-        st.markdown("**Top 3 del mes**")
-        for i, r in enumerate(activos.head(3).itertuples(), 1):
+        st.markdown("**Top 3 del rango**")
+        for i, (_, r) in enumerate(activos.head(3).iterrows(), 1):
             st.markdown(f"<div class='box' style='border-left-color:{C_GREEN}'>"
-                        f"<b>{i}. {r.SUCURSAL}</b> — {fmt(getattr(r, '_4'))}</div>",
+                        f"<b>{i}. {r['SUCURSAL']}</b> — {fmt(r['Rango actual'])}</div>",
                         unsafe_allow_html=True)
     with c2:
-        st.markdown("**Bottom 3 del mes**")
-        for i, r in enumerate(activos.tail(3).iloc[::-1].itertuples(), 1):
+        st.markdown("**Bottom 3 del rango**")
+        for i, (_, r) in enumerate(activos.tail(3).iloc[::-1].iterrows(), 1):
             st.markdown(f"<div class='box' style='border-left-color:{C_RED}'>"
-                        f"<b>{i}. {r.SUCURSAL}</b> — {fmt(getattr(r, '_4'))}</div>",
+                        f"<b>{i}. {r['SUCURSAL']}</b> — {fmt(r['Rango actual'])}</div>",
                         unsafe_allow_html=True)
 
 # ============================================================
