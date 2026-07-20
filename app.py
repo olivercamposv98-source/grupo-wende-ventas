@@ -204,13 +204,8 @@ with st.sidebar:
     fin_def = min(mes_def.end_time.date(), fecha_max)
 
     # Atajos rápidos de rango
-    atajo = st.radio("Rango rápido", ["Mes actual", "Últimos 7 días",
-                                      "Últimos 30 días", "Personalizado"],
+    atajo = st.radio("Rango rápido", ["Mes actual", "Personalizado"],
                      horizontal=False, label_visibility="collapsed")
-    if atajo == "Últimos 7 días":
-        ini_def, fin_def = fecha_max - pd.Timedelta(days=6), fecha_max
-    elif atajo == "Últimos 30 días":
-        ini_def, fin_def = fecha_max - pd.Timedelta(days=29), fecha_max
 
     if atajo == "Personalizado":
         rango = st.date_input("Rango de fechas", value=(ini_def, fin_def),
