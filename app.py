@@ -154,11 +154,17 @@ with st.sidebar:
     assets_dir = Path(__file__).parent / "assets"
     logo = None
     if assets_dir.exists():
-        candidatos = [p for p in assets_dir.iterdir()
-                      if p.suffix.lower() in (".png", ".jpg", ".jpeg", ".webp")
-                      and ("wende" in p.name.lower() or "grupo" in p.name.lower())]
-        if candidatos:
-            logo = candidatos[0]
+        imgs = [p for p in assets_dir.iterdir()
+                if p.suffix.lower() in (".png", ".jpg", ".jpeg", ".webp")]
+        marcas_conocidas = ("chico", "fresa", "beast", "happy", "santo", "chelato")
+        preferidos = [p for p in imgs
+                      if "wende" in p.name.lower() or "grupo" in p.name.lower()]
+        otros = [p for p in imgs
+                 if not any(m in p.name.lower() for m in marcas_conocidas)]
+        if preferidos:
+            logo = preferidos[0]
+        elif otros:
+            logo = otros[0]
     if logo:
         st.image(str(logo), width="stretch")
     st.markdown(f"<p style='color:{C_MUTED};font-size:.8rem;margin-top:-6px'>Sales Dashboard</p>",
