@@ -15,8 +15,7 @@ import streamlit as st
 # ------------------------------------------------------------
 # 1) CONFIGURACIÓN
 # ------------------------------------------------------------
-st.set_page_config(page_title="Grupo Wende · Ventas", page_icon="🟡",
-                   layout="wide", initial_sidebar_state="expanded")
+st.set_page_config(page_title="Grupo Wende · Ventas", layout="wide", initial_sidebar_state="expanded")
 
 C_BG, C_PANEL, C_CARD, C_BORDER = "#0A0A0C", "#111114", "#1A1A1F", "#2A2A32"
 C_YELLOW, C_TEXT, C_MUTED = "#FFD400", "#F4F1E6", "#98969F"
@@ -24,10 +23,6 @@ C_GREEN, C_RED, C_GRAY = "#3DDC84", "#FF5C5C", "#3A3A42"
 
 BRAND_COLORS = {"El Chico Fresa": "#FF3B4E", "MrBeast Burger": "#FFD400",
                 "La Happy Hour": "#F2A900", "Santo Domingo": "#F5A3C7"}
-BRAND_LOGOS = {"El Chico Fresa": "assets/chico_fresa.png",
-               "MrBeast Burger": "assets/mrbeast.png",
-               "La Happy Hour": "assets/la_happy_hour.jpg",
-               "Santo Domingo": "assets/santo_domingo.jpg"}
 DIAS_ES = ["Lun", "Mar", "Mié", "Jue", "Vie", "Sáb", "Dom"]
 MESES_ES = ["", "Enero", "Febrero", "Marzo", "Abril", "Mayo", "Junio", "Julio",
             "Agosto", "Septiembre", "Octubre", "Noviembre", "Diciembre"]
@@ -36,7 +31,7 @@ SHEET_ID = "1pKund1DmfQzY0SGBFrk7VIKeXrqiJzl_QVmJ7roSyek"
 SHEET_URL = f"https://docs.google.com/spreadsheets/d/{SHEET_ID}/export?format=csv"
 LOCAL_CSV = Path(__file__).parent / "data" / "ventas_diarias_raw.csv"
 
-MENU = ["🏠 General", "🏷️ Venta por Marca", "🏪 Venta por Tienda", "📅 Últimos 7 días"]
+MENU = ["General", "Venta por Marca", "Venta por Tienda", "Últimos 7 días"]
 
 # ------------------------------------------------------------
 # 2) ESTILOS
@@ -59,7 +54,9 @@ h1,h2,h3,h4 {{ font-family:'Archivo',sans-serif; }}
 [data-testid="stSidebar"] div[role="radiogroup"] > label:has(input:checked) {{
     background:{C_CARD}; border-left:3px solid {C_YELLOW}; color:{C_YELLOW};
 }}
-[data-testid="stSidebar"] div[role="radiogroup"] > label > div:first-child {{ display:none; }}
+[data-testid="stSidebar"] div[role="radiogroup"] > label > div:first-child,
+[data-testid="stSidebar"] div[role="radiogroup"] > label > span:first-child,
+[data-testid="stSidebar"] div[role="radiogroup"] > label input {{ display:none !important; }}
 [data-testid="stSidebar"] div[role="radiogroup"] > label p {{ font-size:0.95rem; }}
 
 /* --- Tarjetas KPI --- */
@@ -144,9 +141,9 @@ def kpi(col, label, value, delta=None, sub=None, spark=""):
 
 def plotly_base(fig, height=330, title=""):
     fig.update_layout(height=height, margin=dict(l=10, r=10, t=36 if title else 12, b=10),
+                      **({"title": dict(text=title, font=dict(size=14))} if title else {}),
                       paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)",
                       font=dict(color=C_TEXT),
-                      title=dict(text=title, font=dict(size=14)) if title else None,
                       xaxis=dict(gridcolor=C_BORDER), yaxis=dict(gridcolor=C_BORDER, tickformat=",.0f"))
     return fig
 
@@ -154,7 +151,7 @@ def plotly_base(fig, height=330, title=""):
 # 4) SIDEBAR — MENÚ + FILTROS
 # ------------------------------------------------------------
 with st.sidebar:
-    logo = Path(__file__).parent / "assets" / "grupo_wende.jpeg"
+    logo = Path(__file__).parent / "assets" / "grupo_wende.png"
     if logo.exists():
         st.image(str(logo), width="stretch")
     st.markdown(f"<p style='color:{C_MUTED};font-size:.8rem;margin-top:-6px'>Sales Dashboard</p>",
@@ -214,7 +211,7 @@ rank["_mismo"] = rank["SUCURSAL"].map(g_ant_mismo).fillna(0)
 rank["¿Cómo va?"] = np.where(rank["_mismo"] > 0, rank["Este mes"] / rank["_mismo"] - 1, np.nan)
 rank["Estado"] = np.select(
     [rank["Mes anterior"] == 0, rank["Proyección"] >= rank["Mes anterior"]],
-    ["🆕 Nueva", "✅ Supera la meta"], default="⚠️ Bajo la meta")
+    ["Nueva", "Supera la meta"], default="Bajo la meta")
 rank = rank.sort_values("Este mes", ascending=False).reset_index(drop=True)
 
 def encabezado(titulo, subtitulo):
@@ -223,7 +220,7 @@ def encabezado(titulo, subtitulo):
                f"<p style='color:{C_MUTED};margin-top:2px'>{subtitulo}</p>",
                unsafe_allow_html=True)
     csv = d_act.sort_values("FECHA")[["FECHA", "SUCURSAL", "MARCA", "VENTA"]]
-    b.download_button("⬇️ Exportar datos (CSV)",
+    b.download_button("Exportar datos (CSV)",
                       csv.to_csv(index=False).encode("utf-8-sig"),
                       file_name=f"ventas_{mes_actual}.csv", width="stretch")
 
@@ -248,12 +245,12 @@ if pagina == MENU[0]:
     st.markdown("<br>", unsafe_allow_html=True)
     if not pd.isna(cumpl):
         if cumpl >= 1:
-            st.markdown(f"<div class='box' style='border-left-color:{C_GREEN}'>✅ "
+            st.markdown(f"<div class='box' style='border-left-color:{C_GREEN}'>"
                         f"<b>Vamos bien:</b> proyección de cierre {fmt(run_rate)} "
                         f"(<b style='color:{C_GREEN}'>{cumpl-1:+.1%}</b> vs {MESES_ES[mes_anterior.month]}).</div>",
                         unsafe_allow_html=True)
         else:
-            st.markdown(f"<div class='box' style='border-left-color:{C_RED}'>⚠️ "
+            st.markdown(f"<div class='box' style='border-left-color:{C_RED}'>"
                         f"<b>Atención:</b> proyección {fmt(run_rate)} "
                         f"(<b style='color:{C_RED}'>{cumpl-1:+.1%}</b>). Para igualar a "
                         f"{MESES_ES[mes_anterior.month]} hay que vender <b>{fmt(max(ritmo_req,0))}/día</b> "
@@ -313,9 +310,6 @@ elif pagina == MENU[1]:
     for col, (marca, monto) in zip(cols, m_act.items()):
         ant_mismo = d_ant[(d_ant["MARCA"] == marca) & (d_ant["DIA"] <= dia_corte)]["VENTA"].sum()
         delta = (monto / ant_mismo - 1) if ant_mismo else np.nan
-        lg = Path(__file__).parent / BRAND_LOGOS.get(marca, "")
-        if lg.exists():
-            col.image(str(lg), width=56)
         kpi(col, marca, fmt(monto), delta, f"{monto/total:.0%} del total")
 
     st.markdown("<br>", unsafe_allow_html=True)
@@ -353,9 +347,9 @@ elif pagina == MENU[1]:
                        "Mes anterior": m_ant.reindex(m_act.index).fillna(0)})
     tm["Proyección"] = tm["Este mes"] / dia_corte * dias_mes
     tm["Participación"] = tm["Este mes"] / total
-    tm["Estado"] = np.where(tm["Mes anterior"] == 0, "🆕 Nueva",
+    tm["Estado"] = np.where(tm["Mes anterior"] == 0, "Nueva",
                             np.where(tm["Proyección"] >= tm["Mes anterior"],
-                                     "✅ Supera la meta", "⚠️ Bajo la meta"))
+                                     "Supera la meta", "Bajo la meta"))
     st.dataframe(tm.reset_index().rename(columns={"MARCA": "Marca"}).style
                  .format({"Este mes": "Bs {:,.0f}", "Mes anterior": "Bs {:,.0f}",
                           "Proyección": "Bs {:,.0f}", "Participación": "{:.1%}"}),
@@ -397,13 +391,13 @@ elif pagina == MENU[2]:
     activos = rank[rank["Este mes"] > 0]
     c1, c2 = st.columns(2)
     with c1:
-        st.markdown("**🏆 Top 3 del mes**")
+        st.markdown("**Top 3 del mes**")
         for i, r in enumerate(activos.head(3).itertuples(), 1):
             st.markdown(f"<div class='box' style='border-left-color:{C_GREEN}'>"
                         f"<b>{i}. {r.SUCURSAL}</b> — {fmt(getattr(r, '_4'))}</div>",
                         unsafe_allow_html=True)
     with c2:
-        st.markdown("**🔻 Bottom 3 del mes**")
+        st.markdown("**Bottom 3 del mes**")
         for i, r in enumerate(activos.tail(3).iloc[::-1].itertuples(), 1):
             st.markdown(f"<div class='box' style='border-left-color:{C_RED}'>"
                         f"<b>{i}. {r.SUCURSAL}</b> — {fmt(getattr(r, '_4'))}</div>",
