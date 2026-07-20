@@ -5,6 +5,7 @@
 # ============================================================
 
 import calendar
+import time
 from pathlib import Path
 
 import numpy as np
@@ -93,7 +94,7 @@ def asignar_marca(s: str) -> str:
         return "Santo Domingo"
     return "Otras"
 
-@st.cache_data(ttl=600, show_spinner="Cargando ventas…")
+@st.cache_data(ttl=900, show_spinner="Cargando ventas…")
 def cargar_datos() -> pd.DataFrame:
     try:
         df = pd.read_csv(SHEET_URL)
@@ -114,8 +115,25 @@ def cargar_datos() -> pd.DataFrame:
     df.attrs["fuente"] = fuente
     return df
 
+# --- Actualización de datos ---
+# a) Al abrir o recargar la pestaña (sesión nueva): siempre datos frescos
+if "_datos_frescos" not in st.session_state:
+    st.cache_data.clear()
+    st.session_state["_datos_frescos"] = True
+
 df = cargar_datos()
+st.session_state["_ultima_carga"] = st.session_state.get("_ultima_carga") or time.time()
 fmt = lambda v: f"Bs {v:,.0f}"
+
+# b) Mientras la pestaña esté abierta: recarga completa cada 15 minutos
+@st.fragment(run_every=900)
+def _auto_refresh():
+    if time.time() - st.session_state.get("_ultima_carga", 0) >= 895:
+        st.cache_data.clear()
+        st.session_state["_ultima_carga"] = time.time()
+        st.rerun(scope="app")
+
+_auto_refresh()
 
 def sparkline(vals, color=C_YELLOW, w=110, h=26):
     """Mini-gráfico SVG para incrustar dentro de una tarjeta KPI."""
