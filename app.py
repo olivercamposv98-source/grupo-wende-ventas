@@ -151,8 +151,15 @@ def plotly_base(fig, height=330, title=""):
 # 4) SIDEBAR — MENÚ + FILTROS
 # ------------------------------------------------------------
 with st.sidebar:
-    logo = Path(__file__).parent / "assets" / "grupo_wende.png"
-    if logo.exists():
+    assets_dir = Path(__file__).parent / "assets"
+    logo = None
+    if assets_dir.exists():
+        candidatos = [p for p in assets_dir.iterdir()
+                      if p.suffix.lower() in (".png", ".jpg", ".jpeg", ".webp")
+                      and ("wende" in p.name.lower() or "grupo" in p.name.lower())]
+        if candidatos:
+            logo = candidatos[0]
+    if logo:
         st.image(str(logo), width="stretch")
     st.markdown(f"<p style='color:{C_MUTED};font-size:.8rem;margin-top:-6px'>Sales Dashboard</p>",
                 unsafe_allow_html=True)
@@ -215,14 +222,9 @@ rank["Estado"] = np.select(
 rank = rank.sort_values("Este mes", ascending=False).reset_index(drop=True)
 
 def encabezado(titulo, subtitulo):
-    a, b = st.columns([0.72, 0.28])
-    a.markdown(f"<h1 style='margin-bottom:0'>{titulo}</h1>"
-               f"<p style='color:{C_MUTED};margin-top:2px'>{subtitulo}</p>",
-               unsafe_allow_html=True)
-    csv = d_act.sort_values("FECHA")[["FECHA", "SUCURSAL", "MARCA", "VENTA"]]
-    b.download_button("Exportar datos (CSV)",
-                      csv.to_csv(index=False).encode("utf-8-sig"),
-                      file_name=f"ventas_{mes_actual}.csv", width="stretch")
+    st.markdown(f"<h1 style='margin-bottom:0'>{titulo}</h1>"
+                f"<p style='color:{C_MUTED};margin-top:2px'>{subtitulo}</p>",
+                unsafe_allow_html=True)
 
 # ============================================================
 # PÁGINA · GENERAL
