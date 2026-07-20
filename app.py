@@ -465,13 +465,22 @@ else:
     piv["TOTAL 7 DÍAS"] = piv.sum(axis=1)
     piv = piv.sort_values("TOTAL 7 DÍAS", ascending=False)
     piv.loc["TOTAL GRUPO"] = piv.sum()
+    # Los lunes Santo Domingo Urubó no abre: se marca "Cerrado" en vez de "—"
+    lunes_cols = [c for c in fechas7 if pd.Timestamp(c).dayofweek == 0]
     piv.columns = [et_dia(c) if not isinstance(c, str) else c for c in piv.columns]
     styler7 = (piv.style
                .format(lambda v: "—" if pd.isna(v) else f"Bs {v:,.0f}")
                .background_gradient(cmap="YlOrBr_r", axis=None,
                                     subset=pd.IndexSlice[piv.index[:-1], piv.columns[:-1]]))
+    fila_sd = "SANTO DOMINGO URUBO"
+    if fila_sd in piv.index and lunes_cols:
+        cols_lunes = [et_dia(c) for c in lunes_cols]
+        styler7 = styler7.format(
+            lambda v: "Cerrado" if pd.isna(v) else f"Bs {v:,.0f}",
+            subset=pd.IndexSlice[[fila_sd], cols_lunes])
     st.dataframe(styler7, width="stretch", height=520)
-    st.caption("«—» = sin venta registrada ese día · Celdas más claras = mayor venta · "
+    st.caption("«—» = sin venta registrada ese día · «Cerrado» = la tienda no abre ese día "
+               "(Santo Domingo Urubó cierra los lunes) · Celdas más claras = mayor venta · "
                "La última fila suma todo el grupo.")
 
 st.markdown(f"<p style='color:{C_MUTED};font-size:.75rem;margin-top:24px'>Grupo Wende · "
