@@ -1,7 +1,6 @@
 # ============================================================
 #  GRUPO WENDE — DASHBOARD EJECUTIVO DE VENTAS DIARIAS
-#  13 tiendas · 5 marcas · Objetivo: igualar o superar el mes anterior
-#  Streamlit + Plotly · Fondo oscuro · Detalles amarillos
+#  Versión simplificada · 3 pestañas · Objetivo: superar el mes anterior
 # ============================================================
 
 import calendar
@@ -9,109 +8,73 @@ from pathlib import Path
 
 import numpy as np
 import pandas as pd
-import plotly.express as px
 import plotly.graph_objects as go
 import streamlit as st
 
 # ------------------------------------------------------------
-# 1) CONFIGURACIÓN GENERAL
+# 1) CONFIGURACIÓN Y ESTILO
 # ------------------------------------------------------------
 st.set_page_config(
-    page_title="Grupo Wende · Dashboard Ejecutivo",
+    page_title="Grupo Wende · Ventas",
     page_icon="🟡",
     layout="wide",
     initial_sidebar_state="expanded",
 )
 
-# Paleta corporativa (fondo oscuro + amarillo Grupo Wende)
-C_BG      = "#0B0B0E"
-C_PANEL   = "#15151A"
-C_BORDER  = "#26262E"
-C_YELLOW  = "#FFD400"
-C_AMBER   = "#F2A900"
-C_TEXT    = "#F4F1E6"
-C_MUTED   = "#9C9AA6"
-C_GREEN   = "#3DDC84"
-C_RED     = "#FF5C5C"
+C_BG, C_PANEL, C_BORDER = "#0B0B0E", "#15151A", "#26262E"
+C_YELLOW, C_TEXT, C_MUTED = "#FFD400", "#F4F1E6", "#9C9AA6"
+C_GREEN, C_RED = "#3DDC84", "#FF5C5C"
 
 BRAND_COLORS = {
-    "El Chico Fresa":   "#FF3B4E",
-    "MrBeast Burger":   "#FFD400",
-    "La Happy Hour":    "#F2A900",
-    "Santo Domingo":    "#F5A3C7",
+    "El Chico Fresa": "#FF3B4E",
+    "MrBeast Burger": "#FFD400",
+    "La Happy Hour": "#F2A900",
+    "Santo Domingo": "#F5A3C7",
 }
 BRAND_LOGOS = {
-    "El Chico Fresa":   "assets/chico_fresa.png",
-    "MrBeast Burger":   "assets/mrbeast.png",
-    "La Happy Hour":    "assets/la_happy_hour.jpg",
-    "Santo Domingo":    "assets/santo_domingo.jpg",
+    "El Chico Fresa": "assets/chico_fresa.png",
+    "MrBeast Burger": "assets/mrbeast.png",
+    "La Happy Hour": "assets/la_happy_hour.jpg",
+    "Santo Domingo": "assets/santo_domingo.jpg",
 }
-DIAS_ES = ["Lunes", "Martes", "Miércoles", "Jueves", "Viernes", "Sábado", "Domingo"]
+DIAS_ES = ["Lun", "Mar", "Mié", "Jue", "Vie", "Sáb", "Dom"]
 MESES_ES = ["", "Enero", "Febrero", "Marzo", "Abril", "Mayo", "Junio", "Julio",
             "Agosto", "Septiembre", "Octubre", "Noviembre", "Diciembre"]
 
-# Fuente de datos: Google Sheets (export CSV) con respaldo local
-SHEET_ID  = "1pKund1DmfQzY0SGBFrk7VIKeXrqiJzl_QVmJ7roSyek"
+SHEET_ID = "1pKund1DmfQzY0SGBFrk7VIKeXrqiJzl_QVmJ7roSyek"
 SHEET_URL = f"https://docs.google.com/spreadsheets/d/{SHEET_ID}/export?format=csv"
 LOCAL_CSV = Path(__file__).parent / "data" / "ventas_diarias_raw.csv"
 
-# ------------------------------------------------------------
-# 2) ESTILOS (CSS)
-# ------------------------------------------------------------
 st.markdown(
     f"""
     <style>
-    @import url('https://fonts.googleapis.com/css2?family=Archivo:wght@500;700;800&family=IBM+Plex+Sans:wght@400;500;600&display=swap');
+    @import url('https://fonts.googleapis.com/css2?family=Archivo:wght@600;800&family=IBM+Plex+Sans:wght@400;600&display=swap');
+    html, body, [data-testid="stAppViewContainer"] {{ background:{C_BG}; color:{C_TEXT}; font-family:'IBM Plex Sans',sans-serif; }}
+    [data-testid="stSidebar"] {{ background:{C_PANEL}; border-right:1px solid {C_BORDER}; }}
+    h1,h2,h3 {{ font-family:'Archivo',sans-serif; }}
+    .stTabs [data-baseweb="tab"] {{ font-size:1rem; font-weight:600; }}
+    .stTabs [aria-selected="true"] {{ color:{C_YELLOW} !important; }}
 
-    html, body, [data-testid="stAppViewContainer"] {{
-        background-color: {C_BG};
-        color: {C_TEXT};
-        font-family: 'IBM Plex Sans', sans-serif;
-    }}
-    [data-testid="stSidebar"] {{
-        background-color: {C_PANEL};
-        border-right: 1px solid {C_BORDER};
-    }}
-    h1, h2, h3 {{ font-family: 'Archivo', sans-serif; letter-spacing: -0.01em; }}
+    .kpi {{ background:{C_PANEL}; border:1px solid {C_BORDER}; border-top:3px solid {C_YELLOW};
+           border-radius:12px; padding:16px 18px; height:100%; }}
+    .kpi .lbl {{ font-size:.72rem; text-transform:uppercase; letter-spacing:.1em; color:{C_MUTED}; }}
+    .kpi .val {{ font-family:'Archivo'; font-size:1.7rem; font-weight:800; margin-top:4px; }}
+    .kpi .pos {{ color:{C_GREEN}; font-weight:600; font-size:.85rem; }}
+    .kpi .neg {{ color:{C_RED}; font-weight:600; font-size:.85rem; }}
+    .kpi .sub {{ color:{C_MUTED}; font-size:.76rem; margin-top:2px; }}
 
-    .kpi-card {{
-        background: {C_PANEL};
-        border: 1px solid {C_BORDER};
-        border-top: 3px solid {C_YELLOW};
-        border-radius: 12px;
-        padding: 16px 18px 14px 18px;
-        height: 100%;
-    }}
-    .kpi-label {{ font-size: 0.72rem; text-transform: uppercase; letter-spacing: .12em; color: {C_MUTED}; }}
-    .kpi-value {{ font-family:'Archivo'; font-size: 1.65rem; font-weight: 800; color: {C_TEXT}; margin-top: 4px; }}
-    .kpi-delta-pos {{ color: {C_GREEN}; font-size: 0.85rem; font-weight: 600; }}
-    .kpi-delta-neg {{ color: {C_RED}; font-size: 0.85rem; font-weight: 600; }}
-    .kpi-sub {{ color: {C_MUTED}; font-size: 0.78rem; margin-top: 2px; }}
-
-    .insight-box {{
-        background: {C_PANEL};
-        border: 1px solid {C_BORDER};
-        border-left: 4px solid {C_YELLOW};
-        border-radius: 10px;
-        padding: 14px 16px;
-        margin-bottom: 10px;
-    }}
-    .section-title {{
-        font-family: 'Archivo'; font-weight: 800; font-size: 1.15rem;
-        color: {C_YELLOW}; text-transform: uppercase; letter-spacing: .08em;
-        border-bottom: 1px solid {C_BORDER}; padding-bottom: 6px; margin: 8px 0 14px 0;
-    }}
-    div[data-testid="stDataFrame"] {{ border: 1px solid {C_BORDER}; border-radius: 10px; }}
+    .box {{ background:{C_PANEL}; border:1px solid {C_BORDER}; border-left:4px solid {C_YELLOW};
+           border-radius:10px; padding:13px 16px; margin-bottom:10px; }}
     </style>
     """,
     unsafe_allow_html=True,
 )
 
 # ------------------------------------------------------------
-# 3) CARGA Y LIMPIEZA DE DATOS
+# 2) DATOS
 # ------------------------------------------------------------
-def asignar_marca(sucursal: str) -> str:
-    s = sucursal.upper()
+def asignar_marca(s: str) -> str:
+    s = s.upper()
     if s.startswith("CF"):
         return "El Chico Fresa"
     if "BEAST" in s:
@@ -122,7 +85,7 @@ def asignar_marca(sucursal: str) -> str:
         return "Santo Domingo"
     return "Otras"
 
-@st.cache_data(ttl=600, show_spinner="Cargando ventas desde Google Sheets…")
+@st.cache_data(ttl=600, show_spinner="Cargando ventas…")
 def cargar_datos() -> pd.DataFrame:
     try:
         df = pd.read_csv(SHEET_URL)
@@ -130,364 +93,294 @@ def cargar_datos() -> pd.DataFrame:
     except Exception:
         df = pd.read_csv(LOCAL_CSV)
         fuente = "CSV local (respaldo)"
-
     df.columns = [c.strip().upper() for c in df.columns]
     df["SUCURSAL"] = df["SUCURSAL"].astype(str).str.strip().str.replace(r"\s+", " ", regex=True)
-    df["VENTA"] = (
-        df["VENTA REAL"].astype(str)
-        .str.replace("Bs", "", regex=False)
-        .str.replace(",", "", regex=False)
-        .str.strip()
+    df["VENTA"] = pd.to_numeric(
+        df["VENTA REAL"].astype(str).str.replace("Bs", "", regex=False).str.replace(",", "", regex=False),
+        errors="coerce",
     )
-    df["VENTA"] = pd.to_numeric(df["VENTA"], errors="coerce")
-    df = df.dropna(subset=["VENTA"])
     df["FECHA"] = pd.to_datetime(df["FECHA"], format="%d/%m/%Y", errors="coerce")
-    df = df.dropna(subset=["FECHA"])
+    df = df.dropna(subset=["VENTA", "FECHA"])
     df["MES"] = df["FECHA"].dt.to_period("M")
     df["DIA"] = df["FECHA"].dt.day
-    df["DIA_SEMANA"] = df["FECHA"].dt.dayofweek  # 0 = lunes
+    df["DOW"] = df["FECHA"].dt.dayofweek
     df["MARCA"] = df["SUCURSAL"].apply(asignar_marca)
     df.attrs["fuente"] = fuente
     return df
 
 df = cargar_datos()
+fmt = lambda v: f"Bs {v:,.0f}"
 
 # ------------------------------------------------------------
-# 4) SIDEBAR — FILTROS
+# 3) SIDEBAR
 # ------------------------------------------------------------
 with st.sidebar:
-    logo_gw = Path(__file__).parent / "assets" / "grupo_wende.jpeg"
-    if logo_gw.exists():
-        st.image(str(logo_gw), width="stretch")
-    st.markdown("### Filtros del reporte")
-
+    logo = Path(__file__).parent / "assets" / "grupo_wende.jpeg"
+    if logo.exists():
+        st.image(str(logo), width="stretch")
     meses = sorted(df["MES"].unique())
-    # Por defecto: el mes más reciente con cobertura de al menos la mitad de las tiendas
     n_tiendas = df["SUCURSAL"].nunique()
     cobertura = df.groupby("MES")["SUCURSAL"].nunique()
     candidatos = [m for m in meses if cobertura.get(m, 0) >= n_tiendas / 2]
     mes_default = candidatos[-1] if candidatos else meses[-1]
-
     etiqueta = lambda m: f"{MESES_ES[m.month]} {m.year}"
-    mes_actual = st.selectbox(
-        "Mes a analizar", meses, index=meses.index(mes_default), format_func=etiqueta
-    )
+
+    mes_actual = st.selectbox("Mes", meses, index=meses.index(mes_default), format_func=etiqueta)
     mes_anterior = mes_actual - 1
-
-    marcas_disp = sorted(df["MARCA"].unique())
-    marcas_sel = st.multiselect("Marcas", marcas_disp, default=marcas_disp)
-
-    st.caption(f"Fuente: {df.attrs.get('fuente','—')}")
-    st.caption(f"Última venta registrada: {df['FECHA'].max():%d/%m/%Y}")
+    marcas_sel = st.multiselect("Marcas", sorted(df["MARCA"].unique()),
+                                default=sorted(df["MARCA"].unique()))
+    st.caption(f"Fuente: {df.attrs['fuente']}")
+    st.caption(f"Último dato: {df['FECHA'].max():%d/%m/%Y}")
 
 df_f = df[df["MARCA"].isin(marcas_sel)]
 d_act = df_f[df_f["MES"] == mes_actual]
 d_ant = df_f[df_f["MES"] == mes_anterior]
-
 if d_act.empty:
-    st.warning("No hay ventas registradas para el mes y las marcas seleccionadas.")
+    st.warning("No hay ventas para el mes y marcas seleccionadas.")
     st.stop()
 
 # ------------------------------------------------------------
-# 5) CÁLCULOS CENTRALES (las "fórmulas" del dashboard)
+# 4) CÁLCULOS
 # ------------------------------------------------------------
-dias_mes        = calendar.monthrange(mes_actual.year, mes_actual.month)[1]
-dia_corte       = int(d_act["DIA"].max())              # último día con datos
-dias_restantes  = dias_mes - dia_corte
-mes_cerrado     = dia_corte >= dias_mes
+dias_mes = calendar.monthrange(mes_actual.year, mes_actual.month)[1]
+dia_corte = int(d_act["DIA"].max())
+dias_rest = dias_mes - dia_corte
 
-venta_mtd       = d_act["VENTA"].sum()                                  # Ventas MTD
-run_rate        = venta_mtd / dia_corte * dias_mes                      # Run Rate
-venta_ant_total = d_ant["VENTA"].sum()                                  # Total mes anterior
-venta_ant_mismo = d_ant[d_ant["DIA"] <= dia_corte]["VENTA"].sum()       # Mismo período mes ant.
-prom_diario     = venta_mtd / dia_corte                                 # Venta promedio diaria
-
-mom_mismo   = (venta_mtd / venta_ant_mismo - 1) if venta_ant_mismo else np.nan
-mom_proj    = (run_rate / venta_ant_total - 1) if venta_ant_total else np.nan
-cumpl_proj  = (run_rate / venta_ant_total) if venta_ant_total else np.nan
-gap         = venta_ant_total - venta_mtd
-ritmo_req   = gap / dias_restantes if dias_restantes > 0 else 0.0
-
-fmt  = lambda v: f"Bs {v:,.0f}"
-fpct = lambda v: "—" if pd.isna(v) else f"{v:+.1%}"
+venta_mtd = d_act["VENTA"].sum()
+run_rate = venta_mtd / dia_corte * dias_mes
+venta_ant = d_ant["VENTA"].sum()
+venta_ant_mismo = d_ant[d_ant["DIA"] <= dia_corte]["VENTA"].sum()
+prom_diario = venta_mtd / dia_corte
+mom = (venta_mtd / venta_ant_mismo - 1) if venta_ant_mismo else np.nan
+cumpl = (run_rate / venta_ant) if venta_ant else np.nan
+gap = venta_ant - venta_mtd
+ritmo_req = gap / dias_rest if dias_rest > 0 else 0
 
 # ------------------------------------------------------------
-# 6) ENCABEZADO
+# 5) ENCABEZADO + PESTAÑAS
 # ------------------------------------------------------------
-c1, c2 = st.columns([0.75, 0.25])
-with c1:
-    st.markdown(
-        f"<h1 style='margin-bottom:0'>Dashboard Ejecutivo de Ventas</h1>"
-        f"<p style='color:{C_MUTED};margin-top:2px'>Grupo Wende · {len(d_act['SUCURSAL'].unique())} tiendas activas · "
-        f"{etiqueta(mes_actual)} (corte al día {dia_corte})</p>",
-        unsafe_allow_html=True,
-    )
-with c2:
-    objetivo_txt = "✅ Objetivo proyectado: SE SUPERA" if cumpl_proj >= 1 else "⚠️ Objetivo proyectado: EN RIESGO"
-    color_obj = C_GREEN if cumpl_proj >= 1 else C_RED
-    st.markdown(
-        f"<div class='insight-box' style='border-left-color:{color_obj}'>"
-        f"<b>Objetivo:</b> igualar o superar {etiqueta(mes_anterior)}<br>"
-        f"<span style='color:{color_obj};font-weight:700'>{objetivo_txt}</span>"
-        f"<br><span style='color:{C_MUTED};font-size:.8rem'>Proyección = {cumpl_proj:.0%} del mes anterior</span></div>",
-        unsafe_allow_html=True,
-    )
+st.markdown(
+    f"<h1 style='margin-bottom:0'>Ventas Grupo Wende</h1>"
+    f"<p style='color:{C_MUTED};margin-top:2px'>{etiqueta(mes_actual)} · corte al día {dia_corte} · "
+    f"{d_act['SUCURSAL'].nunique()} tiendas activas</p>",
+    unsafe_allow_html=True,
+)
 
-# ------------------------------------------------------------
-# 7) SECCIÓN 1 — RESUMEN EJECUTIVO (KPIs)
-# ------------------------------------------------------------
-st.markdown("<div class='section-title'>1 · Resumen ejecutivo</div>", unsafe_allow_html=True)
+tab1, tab2, tab3 = st.tabs(["📊  Resumen", "🏪  Tiendas y marcas", "📅  Últimos 5 días"])
 
 def kpi(col, label, value, delta=None, sub=None):
-    delta_html = ""
+    d = ""
     if delta is not None and not pd.isna(delta):
-        cls = "kpi-delta-pos" if delta >= 0 else "kpi-delta-neg"
-        arrow = "▲" if delta >= 0 else "▼"
-        delta_html = f"<div class='{cls}'>{arrow} {abs(delta):.1%}</div>"
-    sub_html = f"<div class='kpi-sub'>{sub}</div>" if sub else ""
-    col.markdown(
-        f"<div class='kpi-card'><div class='kpi-label'>{label}</div>"
-        f"<div class='kpi-value'>{value}</div>{delta_html}{sub_html}</div>",
-        unsafe_allow_html=True,
-    )
+        cls = "pos" if delta >= 0 else "neg"
+        d = f"<div class='{cls}'>{'▲' if delta >= 0 else '▼'} {abs(delta):.1%}</div>"
+    s = f"<div class='sub'>{sub}</div>" if sub else ""
+    col.markdown(f"<div class='kpi'><div class='lbl'>{label}</div>"
+                 f"<div class='val'>{value}</div>{d}{s}</div>", unsafe_allow_html=True)
 
-k1, k2, k3, k4, k5 = st.columns(5)
-kpi(k1, f"Ventas {etiqueta(mes_actual)} (MTD)", fmt(venta_mtd), mom_mismo, f"vs mismo período de {MESES_ES[mes_anterior.month]}")
-kpi(k2, "Run Rate (proyección de cierre)", fmt(run_rate), mom_proj, f"vs total {MESES_ES[mes_anterior.month]}")
-kpi(k3, f"Ventas {etiqueta(mes_anterior)}", fmt(venta_ant_total), None, "Mes anterior completo")
-kpi(k4, "Crecimiento MoM proyectado", fpct(mom_proj), None, "Run Rate ÷ mes anterior − 1")
-kpi(k5, "Venta promedio diaria", fmt(prom_diario), None, f"{dia_corte} días transcurridos")
+# ============================================================
+# PESTAÑA 1 · RESUMEN
+# ============================================================
+with tab1:
+    k1, k2, k3, k4 = st.columns(4)
+    kpi(k1, "Venta del mes (acumulada)", fmt(venta_mtd), mom,
+        f"vs mismos días de {MESES_ES[mes_anterior.month]}")
+    kpi(k2, "Proyección de cierre", fmt(run_rate), None,
+        f"Ritmo actual × {dias_mes} días")
+    kpi(k3, f"Total {MESES_ES[mes_anterior.month]}", fmt(venta_ant), None,
+        "La meta a superar")
+    kpi(k4, "Venta promedio por día", fmt(prom_diario), None,
+        f"{dia_corte} días transcurridos")
 
-# Barra de avance hacia el objetivo
-st.markdown("<br>", unsafe_allow_html=True)
-fig_gauge = go.Figure()
-fig_gauge.add_trace(go.Bar(
-    x=[venta_ant_total], y=["Objetivo"], orientation="h",
-    marker=dict(color=C_BORDER), hovertemplate="Objetivo (mes anterior): %{x:,.0f} Bs<extra></extra>",
-))
-fig_gauge.add_trace(go.Bar(
-    x=[venta_mtd], y=["Objetivo"], orientation="h",
-    marker=dict(color=C_YELLOW), hovertemplate="Acumulado MTD: %{x:,.0f} Bs<extra></extra>",
-))
-fig_gauge.add_vline(x=run_rate, line_dash="dash", line_color=C_GREEN if run_rate >= venta_ant_total else C_RED,
-                    annotation_text=f"Proyección {fmt(run_rate)}", annotation_font_color=C_TEXT)
-fig_gauge.update_layout(
-    barmode="overlay", height=110, margin=dict(l=10, r=10, t=26, b=8),
-    paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)",
-    font=dict(color=C_TEXT), showlegend=False,
-    title=dict(text=f"Avance hacia el objetivo ({fmt(venta_ant_total)})", font=dict(size=13, color=C_MUTED)),
-    xaxis=dict(showgrid=False, tickformat=",.0f"), yaxis=dict(showticklabels=False),
-)
-st.plotly_chart(fig_gauge, width="stretch")
+    # Semáforo del objetivo — el mensaje más importante en una sola frase
+    st.markdown("<br>", unsafe_allow_html=True)
+    if pd.isna(cumpl):
+        st.markdown(f"<div class='box'>Sin mes anterior para comparar (tiendas nuevas).</div>",
+                    unsafe_allow_html=True)
+    elif cumpl >= 1:
+        st.markdown(
+            f"<div class='box' style='border-left-color:{C_GREEN}'>"
+            f"✅ <b>Vamos bien:</b> al ritmo actual el mes cierra en <b>{fmt(run_rate)}</b>, "
+            f"un <b style='color:{C_GREEN}'>{cumpl-1:+.1%}</b> sobre {MESES_ES[mes_anterior.month]}.</div>",
+            unsafe_allow_html=True)
+    else:
+        st.markdown(
+            f"<div class='box' style='border-left-color:{C_RED}'>"
+            f"⚠️ <b>Atención:</b> al ritmo actual el mes cierra en <b>{fmt(run_rate)}</b> "
+            f"(<b style='color:{C_RED}'>{cumpl-1:+.1%}</b> vs {MESES_ES[mes_anterior.month]}). "
+            f"Para igualarlo se necesita vender <b>{fmt(max(ritmo_req,0))}/día</b> "
+            f"los próximos {dias_rest} días (hoy: {fmt(prom_diario)}/día).</div>",
+            unsafe_allow_html=True)
 
-if not mes_cerrado and dias_restantes > 0:
-    msg = (f"Para igualar {etiqueta(mes_anterior)} faltan <b>{fmt(max(gap,0))}</b> en "
-           f"<b>{dias_restantes} días</b> → ritmo requerido de <b>{fmt(max(ritmo_req,0))}/día</b> "
-           f"(hoy el ritmo es {fmt(prom_diario)}/día).") if gap > 0 else \
-          (f"🎉 El objetivo ya se alcanzó: el acumulado supera al total de {etiqueta(mes_anterior)} "
-           f"por <b>{fmt(-gap)}</b>.")
-    st.markdown(f"<div class='insight-box'>{msg}</div>", unsafe_allow_html=True)
+    # Barra de avance
+    fig_g = go.Figure()
+    fig_g.add_trace(go.Bar(x=[venta_ant], y=[""], orientation="h", marker_color=C_BORDER,
+                           hovertemplate="Meta: %{x:,.0f} Bs<extra></extra>"))
+    fig_g.add_trace(go.Bar(x=[venta_mtd], y=[""], orientation="h", marker_color=C_YELLOW,
+                           hovertemplate="Acumulado: %{x:,.0f} Bs<extra></extra>"))
+    fig_g.add_vline(x=run_rate, line_dash="dash",
+                    line_color=C_GREEN if run_rate >= venta_ant else C_RED,
+                    annotation_text="Proyección", annotation_font_color=C_TEXT)
+    fig_g.update_layout(barmode="overlay", height=90, showlegend=False,
+                        margin=dict(l=10, r=10, t=24, b=6),
+                        paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)",
+                        font=dict(color=C_TEXT),
+                        title=dict(text="Avance del mes vs meta", font=dict(size=13, color=C_MUTED)),
+                        xaxis=dict(showgrid=False, tickformat=",.0f"),
+                        yaxis=dict(showticklabels=False))
+    st.plotly_chart(fig_g, width="stretch")
 
-# ------------------------------------------------------------
-# 8) SECCIÓN 2 — DESGLOSE POR TIENDA Y MARCA
-# ------------------------------------------------------------
-st.markdown("<div class='section-title'>2 · Desglose por tienda y marca</div>", unsafe_allow_html=True)
+    # Tendencia diaria + día de la semana
+    c_izq, c_der = st.columns([0.6, 0.4])
+    with c_izq:
+        s_act = d_act.groupby("DIA")["VENTA"].sum()
+        s_ant = d_ant.groupby("DIA")["VENTA"].sum()
+        fig_t = go.Figure()
+        if not s_ant.empty:
+            fig_t.add_trace(go.Scatter(x=s_ant.index, y=s_ant.values,
+                                       name=MESES_ES[mes_anterior.month], mode="lines",
+                                       line=dict(color=C_MUTED, width=1.5, dash="dot")))
+        fig_t.add_trace(go.Scatter(x=s_act.index, y=s_act.values,
+                                   name=MESES_ES[mes_actual.month], mode="lines+markers",
+                                   line=dict(color=C_YELLOW, width=3),
+                                   fill="tozeroy", fillcolor="rgba(255,212,0,0.08)"))
+        fig_t.update_layout(height=320, margin=dict(l=10, r=10, t=34, b=10),
+                            paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)",
+                            font=dict(color=C_TEXT), hovermode="x unified",
+                            title=dict(text="Venta por día del mes", font=dict(size=14)),
+                            xaxis=dict(title="Día", gridcolor=C_BORDER),
+                            yaxis=dict(gridcolor=C_BORDER, tickformat=",.0f"),
+                            legend=dict(orientation="h", y=1.15))
+        st.plotly_chart(fig_t, width="stretch")
+    with c_der:
+        base = df_f[df_f["MES"].isin([mes_anterior, mes_actual])]
+        diaria = base.groupby(["FECHA", "DOW"])["VENTA"].sum().reset_index()
+        dow = diaria.groupby("DOW")["VENTA"].mean().reindex(range(7))
+        mejor, peor = int(dow.idxmax()), int(dow.idxmin())
+        colores = [C_GREEN if i == mejor else (C_RED if i == peor else "#5a5340") for i in range(7)]
+        fig_d = go.Figure(go.Bar(x=DIAS_ES, y=dow.values, marker_color=colores,
+                                 hovertemplate="%{x}: Bs %{y:,.0f}<extra></extra>"))
+        fig_d.update_layout(height=320, margin=dict(l=10, r=10, t=34, b=10),
+                            paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)",
+                            font=dict(color=C_TEXT),
+                            title=dict(text=f"Mejor día: {DIAS_ES[mejor]} · Peor día: {DIAS_ES[peor]}",
+                                       font=dict(size=14)),
+                            yaxis=dict(gridcolor=C_BORDER, tickformat=",.0f"))
+        st.plotly_chart(fig_d, width="stretch")
 
-g_act = d_act.groupby(["SUCURSAL", "MARCA"])["VENTA"].sum().rename("Ventas Mes Actual (MTD)")
-g_ant = d_ant.groupby("SUCURSAL")["VENTA"].sum().rename("Ventas Mes Anterior")
-g_ant_mismo = d_ant[d_ant["DIA"] <= dia_corte].groupby("SUCURSAL")["VENTA"].sum()
+# ============================================================
+# PESTAÑA 2 · TIENDAS Y MARCAS
+# ============================================================
+with tab2:
+    g_act = d_act.groupby(["SUCURSAL", "MARCA"])["VENTA"].sum().rename("Este mes")
+    g_ant = d_ant.groupby("SUCURSAL")["VENTA"].sum().rename("Mes anterior")
+    g_ant_mismo = d_ant[d_ant["DIA"] <= dia_corte].groupby("SUCURSAL")["VENTA"].sum()
 
-tabla = g_act.reset_index().merge(g_ant.reset_index(), on="SUCURSAL", how="outer")
-tabla["MARCA"] = tabla["MARCA"].fillna(tabla["SUCURSAL"].apply(asignar_marca))
-tabla = tabla.fillna({"Ventas Mes Actual (MTD)": 0, "Ventas Mes Anterior": 0})
-tabla["Run Rate"] = tabla["Ventas Mes Actual (MTD)"] / dia_corte * dias_mes
-tabla["_ant_mismo"] = tabla["SUCURSAL"].map(g_ant_mismo).fillna(0)
-tabla["Variación %"] = np.where(
-    tabla["_ant_mismo"] > 0,
-    tabla["Ventas Mes Actual (MTD)"] / tabla["_ant_mismo"] - 1,
-    np.nan,
-)
-tabla["% Proyección vs Objetivo"] = np.where(
-    tabla["Ventas Mes Anterior"] > 0,
-    tabla["Run Rate"] / tabla["Ventas Mes Anterior"],
-    np.nan,
-)
-tabla = tabla.sort_values("Ventas Mes Actual (MTD)", ascending=False).reset_index(drop=True)
+    t = g_act.reset_index().merge(g_ant.reset_index(), on="SUCURSAL", how="outer")
+    t["MARCA"] = t["MARCA"].fillna(t["SUCURSAL"].apply(asignar_marca))
+    t = t.fillna({"Este mes": 0, "Mes anterior": 0})
+    t["Proyección"] = t["Este mes"] / dia_corte * dias_mes
+    t["_mismo"] = t["SUCURSAL"].map(g_ant_mismo).fillna(0)
+    t["¿Cómo va?"] = np.where(t["_mismo"] > 0, t["Este mes"] / t["_mismo"] - 1, np.nan)
+    t["Estado"] = np.select(
+        [t["Mes anterior"] == 0, t["Proyección"] >= t["Mes anterior"]],
+        ["🆕 Nueva", "✅ Supera la meta"], default="⚠️ Bajo la meta")
+    t = t.sort_values("Este mes", ascending=False).reset_index(drop=True)
 
-t_izq, t_der = st.columns([0.62, 0.38])
-with t_izq:
-    mostrar = tabla[["SUCURSAL", "MARCA", "Ventas Mes Anterior",
-                     "Ventas Mes Actual (MTD)", "Variación %", "Run Rate",
-                     "% Proyección vs Objetivo"]]
+    st.markdown("#### Ranking de tiendas")
     styler = (
-        mostrar.style
-        .format({"Ventas Mes Anterior": "Bs {:,.0f}",
-                 "Ventas Mes Actual (MTD)": "Bs {:,.0f}",
-                 "Run Rate": "Bs {:,.0f}",
-                 "Variación %": lambda v: "Nueva" if pd.isna(v) else f"{v:+.1%}",
-                 "% Proyección vs Objetivo": lambda v: "—" if pd.isna(v) else f"{v:.0%}"})
+        t[["SUCURSAL", "MARCA", "Mes anterior", "Este mes", "¿Cómo va?", "Proyección", "Estado"]]
+        .style
+        .format({"Mes anterior": "Bs {:,.0f}", "Este mes": "Bs {:,.0f}",
+                 "Proyección": "Bs {:,.0f}",
+                 "¿Cómo va?": lambda v: "—" if pd.isna(v) else f"{v:+.0%}"})
         .map(lambda v: f"color:{C_GREEN}" if isinstance(v, float) and v >= 0 else
                        (f"color:{C_RED}" if isinstance(v, float) and v < 0 else ""),
-             subset=["Variación %"])
-        .background_gradient(cmap="YlOrBr_r", subset=["Ventas Mes Actual (MTD)"])
+             subset=["¿Cómo va?"])
     )
-    st.dataframe(styler, width="stretch", height=520, hide_index=True)
+    st.dataframe(styler, width="stretch", height=500, hide_index=True)
+    st.caption("«¿Cómo va?» compara contra los mismos días del mes anterior. "
+               "«Proyección» estima el cierre manteniendo el ritmo actual.")
 
-with t_der:
-    activos = tabla[tabla["Ventas Mes Actual (MTD)"] > 0]
-    top3 = activos.head(3)
-    bottom3 = activos.tail(3).iloc[::-1]
+    activos = t[t["Este mes"] > 0]
+    c1, c2 = st.columns(2)
+    with c1:
+        st.markdown("**🏆 Top 3 del mes**")
+        for i, r in enumerate(activos.head(3).itertuples(), 1):
+            st.markdown(f"<div class='box' style='border-left-color:{C_GREEN}'>"
+                        f"<b>{i}. {r.SUCURSAL}</b> — {fmt(getattr(r, '_4'))}</div>",
+                        unsafe_allow_html=True)
+    with c2:
+        st.markdown("**🔻 Bottom 3 del mes**")
+        for i, r in enumerate(activos.tail(3).iloc[::-1].itertuples(), 1):
+            st.markdown(f"<div class='box' style='border-left-color:{C_RED}'>"
+                        f"<b>{i}. {r.SUCURSAL}</b> — {fmt(getattr(r, '_4'))}</div>",
+                        unsafe_allow_html=True)
 
-    st.markdown("**🏆 Top 3 tiendas (MTD)**")
-    for i, r in enumerate(top3.itertuples(), 1):
-        st.markdown(
-            f"<div class='insight-box' style='border-left-color:{C_GREEN}'>"
-            f"<b>{i}. {r.SUCURSAL}</b><br>{fmt(r._4)} "
-            f"<span style='color:{C_MUTED}'>· {r.MARCA}</span></div>",
-            unsafe_allow_html=True,
-        )
-    st.markdown("**🔻 Bottom 3 tiendas (MTD)**")
-    for i, r in enumerate(bottom3.itertuples(), 1):
-        st.markdown(
-            f"<div class='insight-box' style='border-left-color:{C_RED}'>"
-            f"<b>{i}. {r.SUCURSAL}</b><br>{fmt(r._4)} "
-            f"<span style='color:{C_MUTED}'>· {r.MARCA}</span></div>",
-            unsafe_allow_html=True,
-        )
-
-# --- Mix de ventas por marca ---
-st.markdown("#### Mix de ventas por marca")
-mix = d_act.groupby("MARCA")["VENTA"].sum().sort_values(ascending=False)
-m_izq, m_der = st.columns([0.45, 0.55])
-with m_izq:
-    fig_mix = go.Figure(go.Pie(
-        labels=mix.index, values=mix.values, hole=0.58,
-        marker=dict(colors=[BRAND_COLORS.get(m, C_MUTED) for m in mix.index],
-                    line=dict(color=C_BG, width=2)),
-        textinfo="percent", textfont=dict(color=C_BG, size=13),
-        hovertemplate="%{label}: Bs %{value:,.0f} (%{percent})<extra></extra>",
-    ))
-    fig_mix.update_layout(
-        height=330, margin=dict(l=0, r=0, t=10, b=0),
-        paper_bgcolor="rgba(0,0,0,0)", font=dict(color=C_TEXT),
-        legend=dict(orientation="h", y=-0.1),
-        annotations=[dict(text=f"<b>{fmt(mix.sum())}</b><br>total", showarrow=False,
-                          font=dict(color=C_TEXT, size=14))],
-    )
-    st.plotly_chart(fig_mix, width="stretch")
-with m_der:
+    st.markdown("#### ¿De dónde viene la venta? (mix por marca)")
+    mix = d_act.groupby("MARCA")["VENTA"].sum().sort_values(ascending=False)
     for marca, monto in mix.items():
         share = monto / mix.sum()
         lg = Path(__file__).parent / BRAND_LOGOS.get(marca, "")
-        cA, cB = st.columns([0.14, 0.86])
+        cA, cB = st.columns([0.08, 0.92])
         if lg.exists():
-            cA.image(str(lg), width=52)
+            cA.image(str(lg), width=48)
         cB.markdown(
-            f"<b>{marca}</b> — {fmt(monto)} · <span style='color:{C_YELLOW}'>{share:.1%}</span> del total"
-            f"<div style='background:{C_BORDER};border-radius:6px;height:8px;margin:4px 0 10px 0'>"
+            f"<b>{marca}</b> — {fmt(monto)} · "
+            f"<span style='color:{C_YELLOW};font-weight:700'>{share:.0%}</span> del total"
+            f"<div style='background:{C_BORDER};border-radius:6px;height:10px;margin:4px 0 12px 0'>"
             f"<div style='background:{BRAND_COLORS.get(marca, C_YELLOW)};width:{share*100:.1f}%;"
-            f"height:8px;border-radius:6px'></div></div>",
-            unsafe_allow_html=True,
-        )
+            f"height:10px;border-radius:6px'></div></div>",
+            unsafe_allow_html=True)
 
-# ------------------------------------------------------------
-# 9) SECCIÓN 3 — ANÁLISIS DE TENDENCIA DIARIA
-# ------------------------------------------------------------
-st.markdown("<div class='section-title'>3 · Análisis de tendencia diaria</div>", unsafe_allow_html=True)
+# ============================================================
+# PESTAÑA 3 · ÚLTIMOS 5 DÍAS
+# ============================================================
+with tab3:
+    fechas5 = sorted(df_f["FECHA"].unique())[-5:]
+    d5 = df_f[df_f["FECHA"].isin(fechas5)]
 
-serie_act = d_act.groupby("DIA")["VENTA"].sum()
-serie_ant = d_ant.groupby("DIA")["VENTA"].sum()
+    tot5 = d5.groupby("FECHA")["VENTA"].sum().reindex(fechas5).fillna(0)
+    var_dia = tot5.pct_change().iloc[-1] if len(tot5) > 1 else np.nan
 
-fig_t = go.Figure()
-if not serie_ant.empty:
-    fig_t.add_trace(go.Scatter(
-        x=serie_ant.index, y=serie_ant.values, name=etiqueta(mes_anterior),
-        mode="lines", line=dict(color=C_MUTED, width=1.5, dash="dot"),
-    ))
-fig_t.add_trace(go.Scatter(
-    x=serie_act.index, y=serie_act.values, name=etiqueta(mes_actual),
-    mode="lines+markers", line=dict(color=C_YELLOW, width=3),
-    marker=dict(size=6), fill="tozeroy", fillcolor="rgba(255,212,0,0.08)",
-))
-fig_t.update_layout(
-    height=340, margin=dict(l=10, r=10, t=30, b=10),
-    paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)",
-    font=dict(color=C_TEXT), title=dict(text="Venta diaria total (Bs)", font=dict(size=14)),
-    xaxis=dict(title="Día del mes", gridcolor=C_BORDER),
-    yaxis=dict(gridcolor=C_BORDER, tickformat=",.0f"),
-    legend=dict(orientation="h", y=1.12),
-    hovermode="x unified",
-)
-st.plotly_chart(fig_t, width="stretch")
+    a, b, c = st.columns(3)
+    kpi(a, "Venta últimos 5 días", fmt(tot5.sum()), None,
+        f"{pd.Timestamp(fechas5[0]):%d/%m} al {pd.Timestamp(fechas5[-1]):%d/%m}")
+    kpi(b, f"Último día ({pd.Timestamp(fechas5[-1]):%d/%m})", fmt(tot5.iloc[-1]),
+        var_dia, "vs día previo")
+    kpi(c, "Promedio diario (5 días)", fmt(tot5.mean()), None,
+        "Todas las tiendas seleccionadas")
 
-# Mejor y peor día de la semana (promedio de venta total por día calendario)
-base_dow = df_f[df_f["MES"].isin([mes_anterior, mes_actual])]
-diaria = base_dow.groupby(["FECHA", "DIA_SEMANA"])["VENTA"].sum().reset_index()
-dow = diaria.groupby("DIA_SEMANA")["VENTA"].mean().reindex(range(7))
-mejor, peor = int(dow.idxmax()), int(dow.idxmin())
-
-d1, d2 = st.columns([0.65, 0.35])
-with d1:
-    colores = [C_GREEN if i == mejor else (C_RED if i == peor else C_AMBER) for i in range(7)]
-    fig_dow = go.Figure(go.Bar(
-        x=DIAS_ES, y=dow.values, marker_color=colores,
-        hovertemplate="%{x}: Bs %{y:,.0f} promedio<extra></extra>",
-        text=[f"{v/1000:,.1f}k" for v in dow.values], textposition="outside",
+    st.markdown("<br>", unsafe_allow_html=True)
+    etiqueta_dia = lambda f: f"{DIAS_ES[pd.Timestamp(f).dayofweek]} {pd.Timestamp(f):%d/%m}"
+    fig5 = go.Figure(go.Bar(
+        x=[etiqueta_dia(f) for f in fechas5], y=tot5.values, marker_color=C_YELLOW,
+        text=[f"{v/1000:,.0f}k" for v in tot5.values], textposition="outside",
         textfont=dict(color=C_TEXT),
-    ))
-    fig_dow.update_layout(
-        height=340, margin=dict(l=10, r=10, t=30, b=10),
-        paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)",
-        font=dict(color=C_TEXT),
-        title=dict(text="Venta promedio por día de la semana", font=dict(size=14)),
-        yaxis=dict(gridcolor=C_BORDER, tickformat=",.0f"),
-    )
-    st.plotly_chart(fig_dow, width="stretch")
-with d2:
-    st.markdown(
-        f"<div class='insight-box' style='border-left-color:{C_GREEN}'>"
-        f"<b>Mejor día: {DIAS_ES[mejor]}</b><br>Promedio {fmt(dow[mejor])} "
-        f"({dow[mejor]/dow[peor]-1:+.0%} vs el peor día)</div>"
-        f"<div class='insight-box' style='border-left-color:{C_RED}'>"
-        f"<b>Peor día: {DIAS_ES[peor]}</b><br>Promedio {fmt(dow[peor])}</div>",
-        unsafe_allow_html=True,
-    )
-    fs = diaria[diaria["DIA_SEMANA"] >= 4]["VENTA"].sum()
-    share_fs = fs / diaria["VENTA"].sum()
-    st.markdown(
-        f"<div class='insight-box'><b>Vie–Sáb–Dom</b> concentra el "
-        f"<span style='color:{C_YELLOW};font-weight:700'>{share_fs:.0%}</span> de la venta.<br>"
-        f"<span style='color:{C_MUTED};font-size:.8rem'>Priorizar personal, insumos y pauta en fin de semana.</span></div>",
-        unsafe_allow_html=True,
-    )
+        hovertemplate="%{x}: Bs %{y:,.0f}<extra></extra>"))
+    fig5.update_layout(height=280, margin=dict(l=10, r=10, t=34, b=10),
+                       paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)",
+                       font=dict(color=C_TEXT),
+                       title=dict(text="Venta total por día", font=dict(size=14)),
+                       yaxis=dict(gridcolor=C_BORDER, tickformat=",.0f"))
+    st.plotly_chart(fig5, width="stretch")
 
-# ------------------------------------------------------------
-# 10) KPIs ADICIONALES DE ALTO VALOR
-# ------------------------------------------------------------
-st.markdown("<div class='section-title'>4 · KPIs adicionales</div>", unsafe_allow_html=True)
+    st.markdown("#### Detalle por tienda")
+    piv = d5.pivot_table(index="SUCURSAL", columns="FECHA", values="VENTA",
+                         aggfunc="sum").reindex(columns=fechas5)
+    piv["TOTAL 5 DÍAS"] = piv.sum(axis=1)
+    piv = piv.sort_values("TOTAL 5 DÍAS", ascending=False)
+    piv.loc["TOTAL GRUPO"] = piv.sum()
+    piv.columns = [etiqueta_dia(c) if not isinstance(c, str) else c for c in piv.columns]
 
-mejor_dia_hist = diaria.loc[diaria["VENTA"].idxmax()]
-cv = (d_act.groupby(["SUCURSAL", "FECHA"])["VENTA"].sum()
-      .groupby("SUCURSAL").agg(["mean", "std"]))
-cv = cv[cv["mean"] > 0]
-cv["cv"] = cv["std"] / cv["mean"]
-consistente = cv["cv"].idxmin() if not cv.empty else "—"
-mayor_salto = tabla.dropna(subset=["Variación %"]).sort_values("Variación %", ascending=False)
-
-e1, e2, e3, e4 = st.columns(4)
-kpi(e1, "Récord diario del período", fmt(mejor_dia_hist["VENTA"]),
-    None, f"{mejor_dia_hist['FECHA']:%d/%m/%Y}")
-kpi(e2, "Tienda más consistente", consistente, None,
-    "Menor variabilidad diaria (CV)")
-if not mayor_salto.empty:
-    kpi(e3, "Mayor crecimiento vs mes ant.", mayor_salto.iloc[0]["SUCURSAL"],
-        mayor_salto.iloc[0]["Variación %"], "Mismo período comparable")
-    kpi(e4, "Mayor caída vs mes ant.", mayor_salto.iloc[-1]["SUCURSAL"],
-        mayor_salto.iloc[-1]["Variación %"], "Mismo período comparable")
+    styler5 = (piv.style
+               .format(lambda v: "—" if pd.isna(v) else f"Bs {v:,.0f}")
+               .background_gradient(cmap="YlOrBr_r", axis=None,
+                                    subset=pd.IndexSlice[piv.index[:-1], piv.columns[:-1]]))
+    st.dataframe(styler5, width="stretch", height=520)
+    st.caption("«—» = sin venta registrada ese día. La última fila suma todo el grupo.")
 
 st.markdown(
-    f"<p style='color:{C_MUTED};font-size:.75rem;margin-top:24px'>"
-    f"Grupo Wende · Control Operativo & Business Intelligence · "
-    f"Datos: hoja «REPORTE DE VENTAS DIARIAS». Los montos están en bolivianos (Bs).</p>",
+    f"<p style='color:{C_MUTED};font-size:.75rem;margin-top:24px'>Grupo Wende · "
+    f"Control Operativo & BI · Datos: hoja «REPORTE DE VENTAS DIARIAS» · Montos en Bs.</p>",
     unsafe_allow_html=True,
 )
