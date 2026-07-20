@@ -254,7 +254,7 @@ def encabezado(titulo, subtitulo):
 # PÁGINA · GENERAL
 # ============================================================
 if pagina == MENU[0]:
-    encabezado("Datos Generales",
+    encabezado("Resumen General",
                f"Resumen de {etiqueta(mes_actual)} · corte al día {dia_corte} · "
                f"{d_act['SUCURSAL'].nunique()} tiendas activas")
 
