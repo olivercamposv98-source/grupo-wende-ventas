@@ -257,12 +257,53 @@ venta_ant = d_ant["VENTA"].sum()                       # mismo rango, mes anteri
 prom_diario = venta_mtd / dias_con_datos
 mom = (venta_mtd / venta_ant - 1) if venta_ant else np.nan
 
-# Proyección de cierre: solo cuando el rango es "mes en curso hasta hoy"
+# Proyección de cierre: solo cuando el rango es "mes en curso hasta hoy".
+# Regla por tienda: el ritmo se calcula SOLO con los días que la tienda registró
+# venta (>0). Días en 0 o en blanco no cuentan (ej. MrBeast abrió el 5, los días
+# 1-4 no entran; Santo Domingo no abre lunes, salvo que un lunes registre venta).
+# Los días restantes del mes se proyectan según los días de semana en que la
+# tienda realmente opera (observados en el mes actual y el anterior).
 if proyectable:
     dias_mes = calendar.monthrange(f_fin.year, f_fin.month)[1]
     dia_corte = int(f_fin.day)
     dias_rest = dias_mes - dia_corte
-    run_rate = venta_mtd / dia_corte * dias_mes
+
+    hist = df_f[df_f["MES"].isin([mes_en_curso - 1, mes_en_curso])]
+    hist = hist[hist["VENTA"] > 0]
+
+    def dias_operativos(s_fechas):
+        """Días de la semana en que la tienda opera realmente: vendió en al
+        menos la mitad de las veces que ese día ocurrió desde su primera venta.
+        (Un lunes aislado con venta no convierte a los lunes en operativos.)"""
+        fechas = pd.DatetimeIndex(sorted(set(s_fechas)))
+        todos = pd.date_range(fechas.min(), fechas.max())
+        oper = set()
+        for d in range(7):
+            occ = int((todos.dayofweek == d).sum())
+            con_venta = int((fechas.dayofweek == d).sum())
+            if occ and con_venta / occ >= 0.5:
+                oper.add(d)
+        return oper or set(range(7))
+
+    dow_oper = hist.groupby("SUCURSAL")["FECHA"].apply(dias_operativos)
+
+    act_pos = d_act[d_act["VENTA"] > 0]
+    mtd_t = act_pos.groupby("SUCURSAL")["VENTA"].sum()
+    dias_t = act_pos.groupby("SUCURSAL")["FECHA"].nunique()
+
+    fin_de_mes = pd.Timestamp(f_fin.year, f_fin.month, dias_mes)
+    fechas_futuras = pd.date_range(f_fin + pd.Timedelta(days=1), fin_de_mes) \
+        if dias_rest > 0 else pd.DatetimeIndex([])
+
+    proy = {}
+    for suc in mtd_t.index:
+        dows = dow_oper.get(suc, set(range(7)))
+        futuros = sum(1 for f in fechas_futuras if f.dayofweek in dows)
+        ritmo_tienda = mtd_t[suc] / dias_t[suc]           # solo días con venta
+        proy[suc] = mtd_t[suc] + ritmo_tienda * futuros   # acumulado + días operables
+    proy_t = pd.Series(proy, dtype=float)
+
+    run_rate = float(proy_t.sum())                        # proyección del grupo
     venta_ant_total_mes = df_f[df_f["MES"] == (mes_en_curso - 1)]["VENTA"].sum()
     cumpl = (run_rate / venta_ant_total_mes) if venta_ant_total_mes else np.nan
     ritmo_req = (venta_ant_total_mes - venta_mtd) / dias_rest if dias_rest > 0 else 0
@@ -272,6 +313,7 @@ else:
     venta_ant_total_mes = np.nan
     cumpl = np.nan
     ritmo_req = 0
+    proy_t = None
 
 serie_diaria = d_act.groupby("FECHA")["VENTA"].sum().sort_index()
 
@@ -284,7 +326,7 @@ rank = rank.fillna({"Rango actual": 0, "Rango anterior": 0})
 rank["¿Cómo va?"] = np.where(rank["Rango anterior"] > 0,
                              rank["Rango actual"] / rank["Rango anterior"] - 1, np.nan)
 if proyectable:
-    rank["Proyección"] = rank["Rango actual"] / dia_corte * dias_mes
+    rank["Proyección"] = rank["SUCURSAL"].map(proy_t).fillna(rank["Rango actual"])
 rank["Estado"] = np.select(
     [rank["Rango anterior"] == 0, rank["Rango actual"] >= rank["Rango anterior"]],
     ["Nueva", "Supera al mes anterior"], default="Bajo el mes anterior")
