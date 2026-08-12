@@ -23,7 +23,8 @@ C_YELLOW, C_TEXT, C_MUTED = "#FFD400", "#F4F1E6", "#98969F"
 C_GREEN, C_RED, C_GRAY = "#3DDC84", "#FF5C5C", "#3A3A42"
 
 BRAND_COLORS = {"El Chico Fresa": "#FF3B4E", "MrBeast Burger": "#FFD400",
-                "La Happy Hour": "#F2A900", "Santo Domingo": "#F5A3C7"}
+                "La Happy Hour": "#F2A900", "Santo Domingo": "#F5A3C7",
+                "Chelato": "#E8E6E0"}
 DIAS_ES = ["Lun", "Mar", "Mié", "Jue", "Vie", "Sáb", "Dom"]
 MESES_ES = ["", "Enero", "Febrero", "Marzo", "Abril", "Mayo", "Junio", "Julio",
             "Agosto", "Septiembre", "Octubre", "Noviembre", "Diciembre"]
@@ -92,6 +93,8 @@ def asignar_marca(s: str) -> str:
         return "La Happy Hour"
     if "SANTO DOMINGO" in s:
         return "Santo Domingo"
+    if "CHELATO" in s:
+        return "Chelato"
     return "Otras"
 
 @st.cache_data(ttl=900, show_spinner="Cargando ventas…")
